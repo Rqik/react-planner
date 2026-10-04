@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import { FurnitureShape } from './furniture-shape';
 import type { PlanItem, PlanPointerEvent } from '../types';
 type Props = {
   item: PlanItem;
@@ -15,6 +16,7 @@ export function PlanObject({
   const clipId = `room-grid-${useId().replace(/:/g, '')}`;
   return (
     <g
+      data-plan-item={i.id}
       onPointerDown={(e) => {
         e.stopPropagation();
         down(e, i.id);
@@ -106,99 +108,7 @@ export function PlanObject({
             />
           </>
         ) : (
-          <>
-            <rect
-              width={i.w}
-              height={i.h}
-              rx=".08"
-              fill="#fcfcfd"
-              stroke="#8f9cab"
-              strokeWidth=".035"
-            />
-            {i.kind === 'bed' && (
-              <>
-                <rect
-                  x=".1"
-                  y=".1"
-                  width={i.w / 2 - 0.15}
-                  height=".4"
-                  rx=".08"
-                  fill="#edf0f4"
-                  stroke="#a3adb9"
-                  strokeWidth=".02"
-                />
-                <rect
-                  x={i.w / 2 + 0.03}
-                  y=".1"
-                  width={i.w / 2 - 0.15}
-                  height=".4"
-                  rx=".08"
-                  fill="#edf0f4"
-                  stroke="#a3adb9"
-                  strokeWidth=".02"
-                />
-                <path
-                  d={`M .1 .65 H ${i.w - 0.1}`}
-                  stroke="#a3adb9"
-                  strokeWidth=".025"
-                />
-              </>
-            )}
-            {i.kind === 'sofa' && (
-              <>
-                <rect
-                  x=".18"
-                  y=".2"
-                  width={i.w - 0.36}
-                  height={i.h - 0.32}
-                  rx=".08"
-                  fill="#e6e9ef"
-                />
-                <path
-                  d={`M ${i.w / 2} .2 V ${i.h - 0.1}`}
-                  stroke="#a3adb9"
-                  strokeWidth=".025"
-                />
-              </>
-            )}
-            {i.kind === 'stairs' &&
-              Array.from({ length: 12 }, (_, n) => (
-                <line
-                  key={n}
-                  x1="0"
-                  x2={i.w}
-                  y1={(n * i.h) / 12}
-                  y2={(n * i.h) / 12}
-                  stroke="#a3adb9"
-                  strokeWidth=".02"
-                />
-              ))}
-            {i.kind === 'bath' && (
-              <rect
-                x=".09"
-                y=".1"
-                width={i.w - 0.18}
-                height={i.h - 0.2}
-                rx=".25"
-                fill="#edf4f6"
-                stroke="#9ab3bd"
-                strokeWidth=".025"
-              />
-            )}
-            {i.kind === 'kitchen' &&
-              Array.from({ length: Math.floor(i.w / 0.6) }, (_, n) => (
-                <rect
-                  key={n}
-                  x={n * 0.6 + 0.05}
-                  y=".07"
-                  width=".5"
-                  height={i.h - 0.14}
-                  fill="#edf0f4"
-                  stroke="#a3adb9"
-                  strokeWidth=".02"
-                />
-              ))}
-          </>
+          <FurnitureShape item={i} />
         )}
       </g>
       {selected && (

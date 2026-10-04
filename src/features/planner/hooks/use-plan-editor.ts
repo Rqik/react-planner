@@ -11,6 +11,8 @@ import type {
   Gesture,
   PlanPointerEvent,
   ResizeSide,
+  SelectionBox,
+  ItemKind,
 } from '../types';
 import { obj, type Project } from '../model/project';
 import { tools, furniture } from '../model/tools';
@@ -19,33 +21,72 @@ import { download } from '@/lib/download';
 import { createTemplate } from '../model/templates';
 import { readStoredProject, saveStoredProject } from '../model/storage';
 import { validProject } from '../model/validation';
+import {
+  expandGroups,
+  selectionBounds,
+  cloneSelection,
+  reorderLayers,
+  placeLayers,
+  type LayerCommand,
+} from '../model/selection';
+import { getFurnitureVariant } from '../model/furniture';
+import { exteriorWalls } from '../model/exterior-walls';
+import { useEditorShortcuts } from './use-editor-shortcuts';
 export function usePlanEditor() {
   const [project, setProjectState] = useState<Project>(readStoredProject),
     [floorIndex, setFloor] = useState(0),
     [tool, setTool] = useState<Tool>('select'),
-    [selected, setSelected] = useState<string | null>(null),
+    [selectedIds, setSelectedIds] = useState<string[]>([]),
     [zoom, setZoom] = useState(1),
     [grid, setGrid] = useState(true),
     [snapToGrid, setSnapToGrid] = useState(true),
     [templates, setTemplates] = useState(false),
     [status, setStatus] = useState(''),
     [past, setPast] = useState<Project[]>([]),
-    [future, setFuture] = useState<Project[]>([]);
+    [future, setFuture] = useState<Project[]>([]),
+    [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null),
+    [variants, setVariants] = useState<Partial<Record<ItemKind, string>>>({}),
+    [clipboardCount, setClipboardCount] = useState(0),
+    [pendingDeleteFloor, setPendingDeleteFloor] = useState<number | null>(null),
+    [showWallsBelow, setShowWallsBelow] = useState(false),
+    [showRoomsBelow, setShowRoomsBelow] = useState(false);
   const floor = Math.min(floorIndex, project.floors.length - 1);
   const svg = useRef<SVGSVGElement>(null),
     file = useRef<HTMLInputElement>(null),
     gesture = useRef<Gesture | null>(null),
-    state = useRef(project);
+    state = useRef(project),
+    selection = useRef<string[]>([]),
+    clipboard = useRef<Item[]>([]),
+    pasteCount = useRef(0);
   // Pointer events can arrive before React commits the preceding render.
   const setProject = useCallback((next: Project) => {
     state.current = next;
     setProjectState(next);
   }, []);
   const items = project.floors[floor] || [],
-    active = items.find((i) => i.id === selected),
+    selected = selectedIds[0] ?? null,
+    selectedItems = items.filter((item) => selectedIds.includes(item.id)),
+    active = selectedItems.length === 1 ? selectedItems[0] : undefined,
     total = items
       .filter((i) => i.kind === 'room')
       .reduce((s, i) => s + i.w * i.h, 0);
+  const setSelection = (ids: string[]) => {
+    selection.current = ids;
+    setSelectedIds(ids);
+  };
+  const setSelected = (id: string | null) =>
+    setSelection(id ? expandGroups(state.current.floors[floor], [id]) : []);
+  const selectItem = (id: string, additive = false) => {
+    const group = expandGroups(state.current.floors[floor], [id]);
+    setSelection(
+      additive
+        ? group.every((value) => selection.current.includes(value))
+          ? selection.current.filter((value) => !group.includes(value))
+          : [...new Set([...selection.current, ...group])]
+        : group,
+    );
+    setTool('select');
+  };
   const commit = (p: Project) => {
     const previous = state.current;
     setPast((h) => [...h.slice(-49), previous]);
@@ -89,8 +130,107 @@ export function usePlanEditor() {
     setSelected(null);
   };
   const remove = () => {
-    commit(replaceItems(items.filter((i) => i.id !== selected)));
+    if (!selection.current.length) return;
+    commit(
+      replaceItems(
+        state.current.floors[floor].filter(
+          (i) => !selection.current.includes(i.id),
+        ),
+      ),
+    );
     setSelected(null);
+  };
+  const copy = () => {
+    const list = state.current.floors[floor].filter((item) =>
+      selection.current.includes(item.id),
+    );
+    if (!list.length) return;
+    clipboard.current = structuredClone(list);
+    setClipboardCount(list.length);
+    pasteCount.current = 0;
+    setStatus(`Скопировано объектов: ${list.length}`);
+  };
+  const paste = () => {
+    if (!clipboard.current.length) return;
+    const current = state.current.floors[floor];
+    if (current.length + clipboard.current.length > 500) {
+      setStatus('На этаже может быть не больше 500 объектов');
+      return;
+    }
+    pasteCount.current += 1;
+    const clones = cloneSelection(
+      clipboard.current,
+      0.3 * pasteCount.current,
+      0.3 * pasteCount.current,
+    );
+    commit(replaceItems([...current, ...clones]));
+    setSelection(clones.map((item) => item.id));
+    setTool('select');
+  };
+  const cut = () => {
+    copy();
+    remove();
+  };
+  const group = () => {
+    if (selection.current.length < 2) return;
+    const groupId = crypto.randomUUID();
+    commit(
+      replaceItems(
+        state.current.floors[floor].map((item) =>
+          selection.current.includes(item.id) ? { ...item, groupId } : item,
+        ),
+      ),
+    );
+  };
+  const ungroup = () => {
+    if (!selectedItems.some((item) => item.groupId)) return;
+    commit(
+      replaceItems(
+        state.current.floors[floor].map((item) =>
+          selection.current.includes(item.id)
+            ? { ...item, groupId: undefined }
+            : item,
+        ),
+      ),
+    );
+  };
+  const selectAll = () =>
+    setSelection(state.current.floors[floor].map((item) => item.id));
+  const selectRoomContents = () => {
+    if (!active || active.kind !== 'room') return;
+    const ids = items
+      .filter(
+        (item) =>
+          item.id === active.id ||
+          (item.kind !== 'room' &&
+            item.x >= active.x &&
+            item.y >= active.y &&
+            item.x + item.w <= active.x + active.w &&
+            item.y + item.h <= active.y + active.h),
+      )
+      .map((item) => item.id);
+    setSelection(expandGroups(items, ids));
+  };
+  const changeLayer = (command: LayerCommand) => {
+    if (!selection.current.length) return;
+    const current = state.current.floors[floor];
+    const next = reorderLayers(current, selection.current, command);
+    if (next.some((item, index) => item.id !== current[index].id))
+      commit(replaceItems(next));
+  };
+  const moveLayersTo = (sourceId: string, targetId: string, above: boolean) => {
+    const current = state.current.floors[floor];
+    const ids = selection.current.includes(sourceId)
+      ? selection.current
+      : expandGroups(current, [sourceId]);
+    const next = placeLayers(current, ids, targetId, above);
+    if (next.some((item, index) => item.id !== current[index].id))
+      commit(replaceItems(next));
+    setSelection(ids);
+  };
+  const setFurnitureVariant = (kind: ItemKind, variant: string) => {
+    setVariants((current) => ({ ...current, [kind]: variant }));
+    setTool(kind);
   };
   const point = (e: PlanPointerEvent) => {
     const p = svg.current!.createSVGPoint();
@@ -114,8 +254,12 @@ export function usePlanEditor() {
           };
     svg.current!.setPointerCapture(e.pointerId);
     if (tool === 'select') {
-      setSelected(id || null);
       if (id) {
+        if (e.shiftKey || e.ctrlKey || e.metaKey) {
+          selectItem(id, true);
+          return;
+        }
+        if (!selection.current.includes(id)) setSelected(id);
         const i = items.find((i) => i.id === id)!;
         gesture.current = {
           mode: 'move',
@@ -123,7 +267,21 @@ export function usePlanEditor() {
           p,
           item: i,
           original: state.current,
+          ids: [...selection.current],
         };
+      } else {
+        const additive = Boolean(e.shiftKey || e.ctrlKey || e.metaKey);
+        const initialSelection = additive ? [...selection.current] : [];
+        if (!additive) setSelected(null);
+        gesture.current = {
+          mode: 'marquee',
+          pointerId: e.pointerId,
+          p,
+          original: state.current,
+          additive,
+          initialSelection,
+        };
+        setSelectionBox({ x: p.x, y: p.y, w: 0, h: 0 });
       }
       return;
     }
@@ -136,7 +294,9 @@ export function usePlanEditor() {
           'Объект';
     let w = 1,
       h = 1;
-    const f = furniture.find((f) => f.id === tool);
+    const f =
+      getFurnitureVariant(tool, variants[tool]) ??
+      furniture.find((f) => f.id === tool);
     if (f) {
       w = f.w;
       h = f.h;
@@ -163,6 +323,9 @@ export function usePlanEditor() {
         h,
       ),
       id: newid,
+      ...(getFurnitureVariant(tool, variants[tool])
+        ? { variant: getFurnitureVariant(tool, variants[tool])!.id }
+        : {}),
     };
     gesture.current = {
       mode: ['room', 'wall'].includes(tool) ? 'draw' : 'place',
@@ -171,8 +334,17 @@ export function usePlanEditor() {
       item: i,
       original: state.current,
     };
-    setSelected(newid);
-    setProject(replaceItems([...items, i]));
+    setSelection([newid]);
+    if (items.length >= 500) {
+      gesture.current = null;
+      setStatus('На этаже может быть не больше 500 объектов');
+      return;
+    }
+    const insertion =
+      tool === 'room' ? items.findIndex((item) => item.kind !== 'room') : -1;
+    const next = [...items];
+    next.splice(insertion < 0 ? next.length : insertion, 0, i);
+    setProject(replaceItems(next));
   };
   const startResize = (e: PlanPointerEvent, id: string, side: ResizeSide) => {
     if (e.button !== 0 || gesture.current) return;
@@ -196,6 +368,30 @@ export function usePlanEditor() {
     const g = gesture.current;
     if (!g || g.pointerId !== e.pointerId) return;
     const raw = point(e);
+    if (g.mode === 'marquee') {
+      const box = {
+        x: Math.min(g.p.x, raw.x),
+        y: Math.min(g.p.y, raw.y),
+        w: Math.abs(raw.x - g.p.x),
+        h: Math.abs(raw.y - g.p.y),
+      };
+      setSelectionBox(box);
+      if (box.w > 0.03 || box.h > 0.03) {
+        const ids = items
+          .filter(
+            (item) =>
+              item.x >= box.x &&
+              item.y >= box.y &&
+              item.x + item.w <= box.x + box.w &&
+              item.y + item.h <= box.y + box.h,
+          )
+          .map((item) => item.id);
+        setSelection([
+          ...new Set([...g.initialSelection, ...expandGroups(items, ids)]),
+        ]);
+      }
+      return;
+    }
     const p =
       g.mode === 'draw'
         ? {
@@ -204,12 +400,40 @@ export function usePlanEditor() {
           }
         : raw;
     let i = g.item;
-    if (g.mode === 'move')
-      i = {
-        ...i,
-        x: alignCoordinate(i.x + p.x - g.p.x, 0, 24 - i.w, snapToGrid),
-        y: alignCoordinate(i.y + p.y - g.p.y, 0, 20 - i.h, snapToGrid),
-      };
+    if (g.mode === 'move') {
+      const moving = g.original.floors[floor].filter((item) =>
+        (g.ids ?? [g.item.id]).includes(item.id),
+      );
+      const bounds = selectionBounds(moving);
+      const anchorX = alignCoordinate(
+        i.x + p.x - g.p.x,
+        i.x - bounds.x,
+        i.x + 24 - bounds.x - bounds.w,
+        snapToGrid,
+      );
+      const anchorY = alignCoordinate(
+        i.y + p.y - g.p.y,
+        i.y - bounds.y,
+        i.y + 20 - bounds.y - bounds.h,
+        snapToGrid,
+      );
+      const dx = anchorX - i.x,
+        dy = anchorY - i.y;
+      setProject(
+        replaceItems(
+          g.original.floors[floor].map((item) =>
+            moving.some((value) => value.id === item.id)
+              ? {
+                  ...item,
+                  x: Number((item.x + dx).toFixed(6)),
+                  y: Number((item.y + dy).toFixed(6)),
+                }
+              : item,
+          ),
+        ),
+      );
+      return;
+    }
     if (g.mode === 'resize' && g.side) {
       const delta =
         g.side === 'left' || g.side === 'right' ? p.x - g.p.x : p.y - g.p.y;
@@ -245,6 +469,11 @@ export function usePlanEditor() {
     if (!gesture.current) return;
     const g = gesture.current;
     if (e && e.pointerId !== g.pointerId) return;
+    if (g.mode === 'marquee') {
+      gesture.current = null;
+      setSelectionBox(null);
+      return;
+    }
     const current = state.current.floors[floor].find(
       (item) => item.id === g.item.id,
     );
@@ -269,6 +498,7 @@ export function usePlanEditor() {
     if (!gesture.current) return;
     setProject(gesture.current.original);
     gesture.current = null;
+    setSelectionBox(null);
     setSelected(null);
   };
 
@@ -291,6 +521,7 @@ export function usePlanEditor() {
     setFloor(0);
     setSelected(null);
     setTemplates(false);
+    setPendingDeleteFloor(null);
     setStatus('Проект открыт. Предыдущий план можно вернуть через отмену.');
   };
   const importProject = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -325,29 +556,99 @@ export function usePlanEditor() {
     setFloor(project.floors.length);
     setSelected(null);
   };
+  const deleteFloor = (index = floor) => {
+    const current = state.current;
+    if (current.floors.length <= 1 || !current.floors[index]) return;
+    commit({
+      ...current,
+      floors: current.floors.filter((_, n) => n !== index),
+    });
+    setFloor(Math.max(0, Math.min(index, current.floors.length - 2)));
+    setSelected(null);
+    setPendingDeleteFloor(null);
+  };
+  const requestDeleteFloor = () => {
+    if (project.floors.length <= 1) return;
+    if (items.length) setPendingDeleteFloor(floor);
+    else deleteFloor();
+  };
+  const copyExteriorWalls = () => {
+    if (floor === 0) return;
+    const walls = exteriorWalls(state.current.floors[floor - 1]);
+    const current = state.current.floors[floor];
+    const key = (item: Item) =>
+      [item.kind, item.x, item.y, item.w, item.h, item.rotation].join(':');
+    const existing = new Set(current.map(key));
+    const unique = walls.filter((item) => {
+      const signature = key(item);
+      if (existing.has(signature)) return false;
+      existing.add(signature);
+      return true;
+    });
+    if (current.length + unique.length > 500) {
+      setStatus('На этаже может быть не больше 500 объектов');
+      return;
+    }
+    if (!unique.length) {
+      setStatus('Новых внешних стен для переноса нет');
+      return;
+    }
+    const firstObject = current.findIndex(
+      (item) => item.kind !== 'room' && item.kind !== 'wall',
+    );
+    const next = [...current];
+    next.splice(firstObject < 0 ? next.length : firstObject, 0, ...unique);
+    commit(replaceItems(next));
+    setSelection(unique.map((item) => item.id));
+    setStatus(`Перенесено внешних стен: ${unique.length}`);
+  };
   const changeFloor = (value: string) => {
     setFloor(Number(value));
     setSelected(null);
   };
   const duplicate = () => {
-    if (!active) return;
-    const item = {
-      ...active,
-      id: crypto.randomUUID(),
-      x: Math.min(24 - active.w, active.x + 0.3),
-      y: Math.min(20 - active.h, active.y + 0.3),
-    };
-    commit(replaceItems([...items, item]));
-    setSelected(item.id);
+    if (!selectedItems.length) return;
+    if (items.length + selectedItems.length > 500) {
+      setStatus('На этаже может быть не больше 500 объектов');
+      return;
+    }
+    const clones = cloneSelection(selectedItems);
+    commit(replaceItems([...items, ...clones]));
+    setSelection(clones.map((item) => item.id));
   };
   const rotate = () => {
     if (active) patch({ rotation: (active.rotation + 90) % 360 });
   };
+  useEditorShortcuts({
+    copy,
+    paste,
+    cut,
+    undo,
+    redo,
+    remove,
+    group,
+    ungroup,
+    selectAll,
+    duplicate,
+    changeLayer,
+    escape: () => {
+      cancelGesture();
+      setSelected(null);
+    },
+  });
   return {
     project,
     floor,
     tool,
     selected,
+    selectedIds,
+    selectedItems,
+    selectionBox,
+    variants,
+    clipboardCount,
+    pendingDeleteFloor,
+    showWallsBelow,
+    showRoomsBelow,
     zoom,
     grid,
     snapToGrid,
@@ -362,6 +663,11 @@ export function usePlanEditor() {
     future,
     setTool,
     setSelected,
+    selectItem,
+    setFurnitureVariant,
+    setPendingDeleteFloor,
+    setShowWallsBelow,
+    setShowRoomsBelow,
     setZoom,
     setGrid,
     setSnapToGrid,
@@ -370,6 +676,15 @@ export function usePlanEditor() {
     undo,
     redo,
     remove,
+    copy,
+    paste,
+    cut,
+    group,
+    ungroup,
+    selectAll,
+    selectRoomContents,
+    changeLayer,
+    moveLayersTo,
     down,
     move,
     up,
@@ -381,6 +696,9 @@ export function usePlanEditor() {
     renameProject,
     saveProject,
     addFloor,
+    requestDeleteFloor,
+    deleteFloor,
+    copyExteriorWalls,
     changeFloor,
     duplicate,
     rotate,

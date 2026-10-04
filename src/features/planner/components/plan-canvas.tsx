@@ -1,4 +1,13 @@
-import { Plus, Undo2, Redo2, Download, ZoomIn, ZoomOut } from 'lucide-react';
+import {
+  Plus,
+  Undo2,
+  Redo2,
+  Download,
+  ZoomIn,
+  ZoomOut,
+  Trash2,
+  Copy,
+} from 'lucide-react';
 import type { PlanEditor } from '../hooks/use-plan-editor';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -6,12 +15,22 @@ import { PlanObject } from './plan-object';
 import { PlanGrid, useGridPatternId } from './plan-grid';
 import { RoomResizeHandles } from './room-resize-handles';
 import { snap } from '../model/geometry';
+import { FloorUnderlay } from './floor-underlay';
+import { ShortcutHelp } from './shortcut-help';
 type Props = Pick<
   PlanEditor,
   | 'project'
   | 'floor'
   | 'tool'
   | 'selected'
+  | 'selectedIds'
+  | 'selectionBox'
+  | 'showWallsBelow'
+  | 'showRoomsBelow'
+  | 'setShowWallsBelow'
+  | 'setShowRoomsBelow'
+  | 'copyExteriorWalls'
+  | 'requestDeleteFloor'
   | 'zoom'
   | 'grid'
   | 'snapToGrid'
@@ -38,6 +57,14 @@ export function PlanCanvas({
   floor,
   tool,
   selected,
+  selectedIds,
+  selectionBox,
+  showWallsBelow,
+  showRoomsBelow,
+  setShowWallsBelow,
+  setShowRoomsBelow,
+  copyExteriorWalls,
+  requestDeleteFloor,
   zoom,
   grid,
   snapToGrid,
@@ -61,7 +88,8 @@ export function PlanCanvas({
 }: Props) {
   const patternId = useGridPatternId();
   const selectedRoom = items.find(
-    (item) => item.id === selected && item.kind === 'room',
+    (item) =>
+      selectedIds.length === 1 && item.id === selected && item.kind === 'room',
   );
   return (
     <main className="editor">
@@ -83,6 +111,19 @@ export function PlanCanvas({
           onClick={addFloor}
         >
           <Plus size={18} />
+        </button>
+        <button
+          title={
+            project.floors.length <= 1
+              ? 'Последний этаж нельзя удалить'
+              : 'Удалить этаж'
+          }
+          aria-label="Удалить текущий этаж"
+          className="icon-btn"
+          disabled={project.floors.length <= 1}
+          onClick={requestDeleteFloor}
+        >
+          <Trash2 size={17} />
         </button>
         <span className="toolbar-separator" />
         <button
@@ -115,6 +156,33 @@ export function PlanCanvas({
           </button>
         </div>
       </div>
+      <div className="floor-tools">
+        <label>
+          <Checkbox
+            id="walls-below"
+            checked={showWallsBelow}
+            disabled={floor === 0}
+            onCheckedChange={(checked) => setShowWallsBelow(checked === true)}
+          />{' '}
+          Стены снизу
+        </label>
+        <label>
+          <Checkbox
+            id="rooms-below"
+            checked={showRoomsBelow}
+            disabled={floor === 0}
+            onCheckedChange={(checked) => setShowRoomsBelow(checked === true)}
+          />{' '}
+          Комнаты снизу
+        </label>
+        <button
+          className="quiet"
+          disabled={floor === 0}
+          onClick={copyExteriorWalls}
+        >
+          <Copy size={14} /> Перенести внешние стены
+        </button>
+      </div>
       <div className="canvas-scroll">
         <div
           className="drawing-sheet"
@@ -138,18 +206,38 @@ export function PlanCanvas({
             style={{ cursor: tool === 'select' ? 'default' : 'crosshair' }}
           >
             <PlanGrid id={patternId} visible={grid} />
-            {[
-              ...items.filter((i) => i.kind === 'room'),
-              ...items.filter((i) => i.kind !== 'room'),
-            ].map((i) => (
+            {items.map((i) => (
               <PlanObject
                 key={i.id}
                 item={i}
-                selected={selected === i.id}
+                selected={selectedIds.includes(i.id)}
                 gridFill={grid ? `url(#${patternId})` : undefined}
                 onPointerDown={down}
               />
             ))}
+            {floor > 0 && (showWallsBelow || showRoomsBelow) ? (
+              <FloorUnderlay
+                items={project.floors[floor - 1]}
+                walls={showWallsBelow}
+                rooms={showRoomsBelow}
+              />
+            ) : null}
+            {selectionBox ? (
+              <rect
+                data-selection="true"
+                x={selectionBox.x}
+                y={selectionBox.y}
+                width={selectionBox.w}
+                height={selectionBox.h}
+                fill="#db6545"
+                fillOpacity=".08"
+                stroke="#db6545"
+                strokeWidth="1.5"
+                vectorEffect="non-scaling-stroke"
+                strokeDasharray=".1 .06"
+                pointerEvents="none"
+              />
+            ) : null}
             {selectedRoom ? (
               <RoomResizeHandles item={selectedRoom} onResize={startResize} />
             ) : null}
@@ -166,20 +254,25 @@ export function PlanCanvas({
           <label htmlFor="snap-grid">Привязка 10 см</label>
           <span className="footer-muted">· Поле 24 × 20 м</span>
         </span>
-        <div className="zoom">
-          <button
-            aria-label="Уменьшить"
-            onClick={() => setZoom((z) => Math.max(0.6, snap(z - 0.2)))}
-          >
-            <ZoomOut size={17} />
-          </button>
-          <button onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>
-          <button
-            aria-label="Увеличить"
-            onClick={() => setZoom((z) => Math.min(2.4, snap(z + 0.2)))}
-          >
-            <ZoomIn size={17} />
-          </button>
+        <div className="footer-actions">
+          <ShortcutHelp />
+          <div className="zoom">
+            <button
+              aria-label="Уменьшить"
+              onClick={() => setZoom((z) => Math.max(0.6, snap(z - 0.2)))}
+            >
+              <ZoomOut size={17} />
+            </button>
+            <button onClick={() => setZoom(1)}>
+              {Math.round(zoom * 100)}%
+            </button>
+            <button
+              aria-label="Увеличить"
+              onClick={() => setZoom((z) => Math.min(2.4, snap(z + 0.2)))}
+            >
+              <ZoomIn size={17} />
+            </button>
+          </div>
         </div>
       </div>
     </main>

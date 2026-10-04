@@ -10,6 +10,9 @@ export type PlanItem = {
   h: number;
   rotation: number;
   color: string;
+  groupId?: string;
+  variant?: string;
+  wallType?: 'interior' | 'exterior';
 };
 export type ItemKind =
   | 'room'
@@ -23,7 +26,7 @@ export type ItemKind =
   | 'stairs';
 export type Tool = 'select' | ItemKind;
 export type ResizeSide = 'left' | 'right' | 'top' | 'bottom';
-export type Gesture = {
+type ItemGesture = {
   mode: 'move' | 'draw' | 'place' | 'resize';
   side?: ResizeSide;
   pointerId: number;
@@ -33,5 +36,17 @@ export type Gesture = {
   };
   item: PlanItem;
   original: Project;
+  ids?: string[];
 };
+export type SelectionBox = { x: number; y: number; w: number; h: number };
+export type Gesture =
+  | ItemGesture
+  | {
+      mode: 'marquee';
+      pointerId: number;
+      p: { x: number; y: number };
+      original: Project;
+      additive: boolean;
+      initialSelection: string[];
+    };
 export type PlanPointerEvent = PointerEvent<SVGElement>;

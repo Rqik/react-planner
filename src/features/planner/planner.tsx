@@ -5,6 +5,9 @@ import { ToolboxPanel } from './components/toolbox-panel';
 import { PlanCanvas } from './components/plan-canvas';
 import { PropertiesPanel } from './components/properties-panel';
 import { TemplateDialog } from './components/template-dialog';
+import { SelectionActions } from './components/selection-actions';
+import { LayersPanel } from './components/layers-panel';
+import { DeleteFloorDialog } from './components/delete-floor-dialog';
 export function Planner() {
   const editor = usePlanEditor();
   return (
@@ -20,12 +23,22 @@ export function Planner() {
           tool={editor.tool}
           setTool={editor.setTool}
           setTemplates={editor.setTemplates}
+          variants={editor.variants}
+          setFurnitureVariant={editor.setFurnitureVariant}
         />
         <PlanCanvas
           project={editor.project}
           floor={editor.floor}
           tool={editor.tool}
           selected={editor.selected}
+          selectedIds={editor.selectedIds}
+          selectionBox={editor.selectionBox}
+          showWallsBelow={editor.showWallsBelow}
+          showRoomsBelow={editor.showRoomsBelow}
+          setShowWallsBelow={editor.setShowWallsBelow}
+          setShowRoomsBelow={editor.setShowRoomsBelow}
+          copyExteriorWalls={editor.copyExteriorWalls}
+          requestDeleteFloor={editor.requestDeleteFloor}
           zoom={editor.zoom}
           grid={editor.grid}
           snapToGrid={editor.snapToGrid}
@@ -49,18 +62,18 @@ export function Planner() {
         />
         <PropertiesPanel
           project={editor.project}
-          selected={editor.selected}
+          selectedIds={editor.selectedIds}
+          selectedItems={editor.selectedItems}
           file={editor.file}
           items={editor.items}
           active={editor.active}
           total={editor.total}
-          setTool={editor.setTool}
           setSelected={editor.setSelected}
           patch={editor.patch}
-          remove={editor.remove}
           importProject={editor.importProject}
-          duplicate={editor.duplicate}
-          rotate={editor.rotate}
+          selectItem={editor.selectItem}
+          selectionActions={<SelectionActions {...editor} />}
+          layers={<LayersPanel {...editor} />}
         />
       </div>
       {editor.status ? (
@@ -74,6 +87,7 @@ export function Planner() {
         setTemplates={editor.setTemplates}
         loadTemplate={editor.loadTemplate}
       />
+      <DeleteFloorDialog {...editor} />
     </div>
   );
 }

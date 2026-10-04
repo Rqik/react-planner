@@ -1,35 +1,36 @@
-import { Square, Upload, Trash2, Copy, RotateCw, X } from 'lucide-react';
+import { Square, Upload, X } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { furnitureVariants } from '../model/furniture';
 import type { PlanEditor } from '../hooks/use-plan-editor';
 type Props = Pick<
   PlanEditor,
   | 'project'
-  | 'selected'
+  | 'selectedIds'
+  | 'selectedItems'
   | 'file'
   | 'items'
   | 'active'
   | 'total'
-  | 'setTool'
   | 'setSelected'
+  | 'selectItem'
   | 'patch'
-  | 'remove'
   | 'importProject'
-  | 'duplicate'
-  | 'rotate'
->;
+> & { selectionActions: ReactNode; layers: ReactNode };
 export function PropertiesPanel({
   project,
-  selected,
+  selectedIds,
+  selectedItems,
   file,
   items,
   active,
   total,
-  setTool,
   setSelected,
   patch,
-  remove,
   importProject,
-  duplicate,
-  rotate,
+  selectItem,
+  selectionActions,
+  layers,
 }: Props) {
   return (
     <aside className="right-panel">
@@ -56,6 +57,37 @@ export function PropertiesPanel({
               onChange={(e) => patch({ name: e.target.value })}
             />
           </label>
+          {furnitureVariants[active.kind] ? (
+            <label className="field">
+              Вариант
+              <select
+                value={active.variant ?? furnitureVariants[active.kind]![0].id}
+                onChange={(event) => {
+                  const variant = furnitureVariants[active.kind]!.find(
+                    (item) => item.id === event.target.value,
+                  )!;
+                  patch({ variant: variant.id, w: variant.w, h: variant.h });
+                }}
+              >
+                {furnitureVariants[active.kind]!.map((variant) => (
+                  <option key={variant.id} value={variant.id}>
+                    {variant.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {active.kind === 'wall' ? (
+            <label className="wall-type">
+              <Checkbox
+                checked={active.wallType === 'exterior'}
+                onCheckedChange={(checked) =>
+                  patch({ wallType: checked ? 'exterior' : 'interior' })
+                }
+              />{' '}
+              Внешняя стена
+            </label>
+          ) : null}
           <div className="field-grid">
             {(
               [
@@ -126,19 +158,16 @@ export function PropertiesPanel({
               </label>
             </>
           )}
-          <div className="object-actions">
-            <button onClick={duplicate}>
-              <Copy size={16} /> Копия
-            </button>
-            {active.kind !== 'room' && active.kind !== 'wall' && (
-              <button onClick={rotate}>
-                <RotateCw size={16} /> Повернуть
-              </button>
-            )}
-            <button className="danger" onClick={remove}>
-              <Trash2 size={16} /> Удалить
-            </button>
-          </div>
+        </>
+      ) : selectedItems.length > 1 ? (
+        <>
+          <h2 className="overview-title">
+            Выбрано {selectedItems.length} объектов
+          </h2>
+          <p className="muted">
+            Потяните за выделенный объект, чтобы переместить всё выделение.
+            Сгруппируйте объекты, чтобы сохранить связь.
+          </p>
         </>
       ) : (
         <>
@@ -165,6 +194,8 @@ export function PropertiesPanel({
           </div>
         </>
       )}
+      {selectionActions}
+      {layers}
       <div className="room-section">
         <div className="panel-heading">
           КОМНАТЫ НА ЭТАЖЕ{' '}
@@ -175,11 +206,15 @@ export function PropertiesPanel({
           .map((i) => (
             <button
               key={i.id}
-              className={selected === i.id ? 'room-row selected' : 'room-row'}
-              onClick={() => {
-                setSelected(i.id);
-                setTool('select');
-              }}
+              className={
+                selectedIds.includes(i.id) ? 'room-row selected' : 'room-row'
+              }
+              onClick={(event) =>
+                selectItem(
+                  i.id,
+                  event.shiftKey || event.ctrlKey || event.metaKey,
+                )
+              }
             >
               <span className="room-color" style={{ background: i.color }} />
               <span>{i.name}</span>

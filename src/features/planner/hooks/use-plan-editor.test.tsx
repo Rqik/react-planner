@@ -149,7 +149,8 @@ it('records a complete drawing gesture as a single undoable change', () => {
     editor.move(pointer(4, 5));
     editor.up();
   });
-  expect(editor.items.at(-1)).toMatchObject({
+  const drawnId = editor.selected;
+  expect(editor.active).toMatchObject({
     kind: 'room',
     x: 1,
     y: 1,
@@ -160,7 +161,10 @@ it('records a complete drawing gesture as a single undoable change', () => {
   act(() => editor.undo());
   expect(editor.project).toEqual(original);
   act(() => editor.redo());
-  expect(editor.items.at(-1)).toMatchObject({ w: 3, h: 4 });
+  expect(editor.items.find((item) => item.id === drawnId)).toMatchObject({
+    w: 3,
+    h: 4,
+  });
 });
 
 it('resizes a room by its side with snapping, undo and redo', () => {
@@ -208,4 +212,142 @@ it('snaps movement to cells and supports disabling snapping', () => {
     editor.up();
   });
   expect(editor.items[0]).toMatchObject({ x: 3.434, y: 3.956 });
+});
+
+it('groups a room and its contents and moves them together', () => {
+  mockCoordinates();
+  act(() => editor.selectItem('a'));
+  act(() => editor.selectRoomContents());
+  expect(editor.selectedIds).toContain('sofa');
+  expect(editor.selectedIds).toContain('kitchen');
+  act(() => editor.group());
+  const original = structuredClone(editor.items);
+  act(() => editor.setSelected('sofa'));
+  expect(editor.selectedIds).toContain('a');
+  act(() => {
+    editor.down(pointer(4, 4), 'sofa');
+    editor.move(pointer(5, 5));
+    editor.up();
+  });
+  for (const item of original.filter((item) => item.groupId)) {
+    expect(editor.items.find((value) => value.id === item.id)).toMatchObject({
+      x: item.x + 1,
+      y: item.y + 1,
+    });
+  }
+  act(() => editor.undo());
+  expect(editor.items).toEqual(original);
+});
+
+it('selects by a rectangle and keeps selected groups intact', () => {
+  mockCoordinates();
+  act(() => {
+    editor.down(pointer(2.5, 2.5));
+    editor.move(pointer(9.1, 8.1));
+    editor.up();
+  });
+  expect(editor.selectedIds).toContain('a');
+  expect(editor.selectedIds).toContain('sofa');
+  expect(editor.selectedIds).not.toContain('bed');
+  expect(editor.past).toHaveLength(0);
+});
+
+it('copies and cuts groups across floors and supports keyboard undo', () => {
+  act(() => editor.selectItem('a'));
+  act(() => editor.selectItem('sofa', true));
+  act(() => editor.group());
+  const shortcut = (code: string, shiftKey = false) =>
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        code,
+        key: code.replace('Key', '').toLowerCase(),
+        ctrlKey: true,
+        shiftKey,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  act(() => shortcut('KeyX'));
+  expect(editor.items.some((item) => item.id === 'a')).toBe(false);
+  act(() => editor.changeFloor('1'));
+  const count = editor.items.length;
+  act(() => shortcut('KeyV'));
+  expect(editor.items.length).toBe(count + 2);
+  expect(editor.selectedItems[0].groupId).toBe(editor.selectedItems[1].groupId);
+  act(() => shortcut('KeyZ'));
+  expect(editor.items.length).toBe(count);
+  act(() => shortcut('KeyZ', true));
+  expect(editor.items.length).toBe(count + 2);
+});
+
+it('does not apply editor shortcuts inside text fields', () => {
+  act(() => editor.selectItem('a'));
+  const input = document.createElement('input');
+  container.append(input);
+  act(() =>
+    input.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Delete',
+        bubbles: true,
+        cancelable: true,
+      }),
+    ),
+  );
+  expect(editor.items.some((item) => item.id === 'a')).toBe(true);
+  act(() =>
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Delete',
+        bubbles: true,
+        cancelable: true,
+      }),
+    ),
+  );
+  expect(editor.items.some((item) => item.id === 'a')).toBe(false);
+});
+
+it('requests confirmation only for nonempty floors and retains one floor', () => {
+  act(() => editor.requestDeleteFloor());
+  expect(editor.pendingDeleteFloor).toBe(0);
+  expect(editor.project.floors).toHaveLength(2);
+  act(() => editor.setPendingDeleteFloor(null));
+  act(() => editor.addFloor());
+  act(() => editor.requestDeleteFloor());
+  expect(editor.project.floors).toHaveLength(2);
+  expect(editor.pendingDeleteFloor).toBeNull();
+  act(() => editor.deleteFloor(0));
+  act(() => editor.deleteFloor(0));
+  expect(editor.project.floors).toHaveLength(1);
+  act(() => editor.undo());
+  expect(editor.project.floors).toHaveLength(2);
+});
+
+it('copies previous floor exterior walls only once and saves furniture variants', () => {
+  mockCoordinates();
+  act(() => editor.addFloor());
+  act(() => editor.copyExteriorWalls());
+  expect(editor.items.length).toBeGreaterThan(0);
+  expect(
+    editor.items.every(
+      (item) => item.kind === 'wall' && item.wallType === 'exterior',
+    ),
+  ).toBe(true);
+  const count = editor.items.length;
+  act(() => editor.copyExteriorWalls());
+  expect(editor.items.length).toBe(count);
+  act(() => editor.setFurnitureVariant('stairs', 'u-shaped'));
+  act(() => {
+    editor.down(pointer(4, 4));
+    editor.up();
+  });
+  expect(editor.active).toMatchObject({
+    kind: 'stairs',
+    variant: 'u-shaped',
+    w: 2.2,
+    h: 3,
+  });
+  expect(
+    JSON.parse(localStorage.getItem('domplan-project')!).floors[2].at(-1)
+      .variant,
+  ).toBe('u-shaped');
 });

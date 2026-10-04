@@ -1,4 +1,6 @@
 import type { Project } from './project';
+import { furnitureVariants } from './furniture';
+import type { ItemKind } from '../types';
 const kinds = new Set([
   'room',
   'wall',
@@ -38,6 +40,25 @@ export function validProject(value: unknown): value is Project {
       )
         return false;
       const { x, y, w, h, rotation } = item;
+      if (
+        item.groupId !== undefined &&
+        (typeof item.groupId !== 'string' || !item.groupId)
+      )
+        return false;
+      if (
+        item.wallType !== undefined &&
+        (item.kind !== 'wall' ||
+          !['interior', 'exterior'].includes(String(item.wallType)))
+      )
+        return false;
+      if (
+        item.variant !== undefined &&
+        (typeof item.variant !== 'string' ||
+          !furnitureVariants[item.kind as ItemKind]?.some(
+            (variant) => variant.id === item.variant,
+          ))
+      )
+        return false;
       if (
         typeof x !== 'number' ||
         typeof y !== 'number' ||

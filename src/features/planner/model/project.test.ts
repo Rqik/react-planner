@@ -4,6 +4,8 @@ import { seed } from './project';
 import { createTemplate } from './templates';
 import { validProject } from './validation';
 import { readStoredProject, saveStoredProject } from './storage';
+import { furnitureVariants } from './furniture';
+import type { ItemKind } from '../types';
 
 beforeEach(() => {
   localStorage.clear();
@@ -11,6 +13,42 @@ beforeEach(() => {
 });
 
 describe('project files and persistence', () => {
+  it('round trips every furniture variant with grouping and rejects invalid metadata', () => {
+    for (const [kind, variants] of Object.entries(furnitureVariants)) {
+      for (const variant of variants) {
+        const project = {
+          name: 'Variants',
+          floors: [
+            [
+              {
+                ...seed.floors[0][0],
+                kind: kind as ItemKind,
+                variant: variant.id,
+                w: variant.w,
+                h: variant.h,
+                groupId: 'group',
+              },
+            ],
+          ],
+        };
+        expect(validProject(project)).toBe(true);
+        expect(saveStoredProject(project)).toBe(true);
+        expect(readStoredProject()).toEqual(project);
+      }
+    }
+    expect(
+      validProject({
+        name: 'Invalid',
+        floors: [[{ ...seed.floors[0][0], variant: 'unknown' }]],
+      }),
+    ).toBe(false);
+    expect(
+      validProject({
+        name: 'Invalid',
+        floors: [[{ ...seed.floors[0][0], groupId: 42 }]],
+      }),
+    ).toBe(false);
+  });
   it.each(['empty', 'single', 'family'])(
     'round trips the %s template',
     (kind) => {
