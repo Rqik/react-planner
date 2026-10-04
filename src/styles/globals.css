@@ -275,6 +275,7 @@ button svg {
 }
 .editor {
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: #eef2f6;
@@ -335,6 +336,7 @@ button svg {
 }
 .canvas-scroll {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 28px 30px 20px;
 }
@@ -365,9 +367,20 @@ button svg {
   user-select: none;
 }
 .ruler {
-  font-size: 0.2px;
-  fill: #97a5b4;
+  font-size: 0.28px;
+  fill: #62758a;
   text-anchor: middle;
+}
+.snap-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.snap-control label {
+  cursor: pointer;
+}
+.room-resize-handle:hover rect:last-child {
+  fill: #f9eeea;
 }
 .canvas-footer {
   height: 48px;

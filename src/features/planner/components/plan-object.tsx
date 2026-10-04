@@ -1,10 +1,18 @@
+import { useId } from 'react';
 import type { PlanItem, PlanPointerEvent } from '../types';
 type Props = {
   item: PlanItem;
   selected: boolean;
+  gridFill?: string;
   onPointerDown: (event: PlanPointerEvent, id?: string) => void;
 };
-export function PlanObject({ item: i, selected, onPointerDown: down }: Props) {
+export function PlanObject({
+  item: i,
+  selected,
+  gridFill,
+  onPointerDown: down,
+}: Props) {
+  const clipId = `room-grid-${useId().replace(/:/g, '')}`;
   return (
     <g
       onPointerDown={(e) => {
@@ -23,6 +31,24 @@ export function PlanObject({ item: i, selected, onPointerDown: down }: Props) {
               stroke="#35414e"
               strokeWidth=".13"
             />
+            {gridFill ? (
+              <>
+                <defs>
+                  <clipPath id={clipId}>
+                    <rect width={i.w} height={i.h} />
+                  </clipPath>
+                </defs>
+                <g clipPath={`url(#${clipId})`} pointerEvents="none">
+                  <rect
+                    transform={`translate(${-i.x} ${-i.y})`}
+                    width="24"
+                    height="20"
+                    fill={gridFill}
+                    opacity=".6"
+                  />
+                </g>
+              </>
+            ) : null}
             <text
               x={i.w / 2}
               y={i.h / 2 - 0.1}

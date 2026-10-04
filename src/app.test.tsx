@@ -62,3 +62,26 @@ it('opens templates and creates an empty project', () => {
     )!.value,
   ).toBe('Новый проект');
 });
+
+it('renders grid patterns with unique IDs and outside rulers, and toggles grid visibility', () => {
+  const ids = [...container.querySelectorAll('[id]')].map((node) => node.id);
+  expect(new Set(ids).size).toBe(ids.length);
+  const grid = container.querySelector('[data-plan-grid]')!;
+  const pattern = grid.getAttribute('fill')!.slice(5, -1);
+  expect(document.getElementById(pattern)?.tagName).toBe('pattern');
+  const rulers = [...container.querySelectorAll('text.ruler')];
+  expect(rulers).toHaveLength(46);
+  expect(
+    rulers.every(
+      (node) =>
+        Number(node.getAttribute('x')) < 0 ||
+        Number(node.getAttribute('y')) < 0,
+    ),
+  ).toBe(true);
+  act(() => container.querySelector<HTMLButtonElement>('#grid')!.click());
+  expect(container.querySelector('[data-plan-grid]')).toBeNull();
+  act(() => container.querySelector<HTMLButtonElement>('#grid')!.click());
+  expect(container.querySelector('[data-plan-grid]')).not.toBeNull();
+  act(() => container.querySelector<HTMLButtonElement>('.room-row')!.click());
+  expect(container.querySelectorAll('[data-resize-side]')).toHaveLength(4);
+});

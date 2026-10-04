@@ -11,6 +11,30 @@ let root: Root;
 let editor: PlanEditor;
 let container: HTMLDivElement;
 
+const pointer = (x: number, y: number) =>
+  ({
+    clientX: x,
+    clientY: y,
+    button: 0,
+    pointerId: 1,
+    stopPropagation: () => {},
+    preventDefault: () => {},
+  }) as PlanPointerEvent;
+
+function mockCoordinates() {
+  Object.assign(editor.svg.current!, {
+    createSVGPoint: () => ({
+      x: 0,
+      y: 0,
+      matrixTransform() {
+        return { x: this.x, y: this.y };
+      },
+    }),
+    getScreenCTM: () => ({ inverse: () => ({}) }),
+    setPointerCapture: () => {},
+  });
+}
+
 function Harness() {
   editor = usePlanEditor();
   return (
@@ -137,4 +161,51 @@ it('records a complete drawing gesture as a single undoable change', () => {
   expect(editor.project).toEqual(original);
   act(() => editor.redo());
   expect(editor.items.at(-1)).toMatchObject({ w: 3, h: 4 });
+});
+
+it('resizes a room by its side with snapping, undo and redo', () => {
+  mockCoordinates();
+  act(() => editor.startResize(pointer(9, 5), editor.items[0].id, 'right'));
+  act(() => {
+    editor.move(pointer(10.26, 5));
+    editor.up();
+  });
+  expect(editor.active).toMatchObject({ x: 3, y: 3, w: 7.3, h: 5 });
+  expect(editor.past).toHaveLength(1);
+  act(() => editor.undo());
+  expect(editor.items[0].w).toBe(6);
+  act(() => editor.redo());
+  expect(editor.items[0].w).toBe(7.3);
+});
+
+it('cancels a resize without changing history and ignores a stationary click', () => {
+  mockCoordinates();
+  act(() => editor.startResize(pointer(3, 5), editor.items[0].id, 'left'));
+  act(() => editor.move(pointer(1, 5)));
+  expect(editor.items[0].x).toBe(1);
+  act(() => editor.cancelGesture());
+  expect(editor.items[0]).toMatchObject({ x: 3, w: 6 });
+  expect(editor.past).toHaveLength(0);
+  act(() => {
+    editor.down(pointer(4, 4), editor.items[0].id);
+    editor.up();
+  });
+  expect(editor.past).toHaveLength(0);
+});
+
+it('snaps movement to cells and supports disabling snapping', () => {
+  mockCoordinates();
+  act(() => {
+    editor.down(pointer(4, 4), editor.items[0].id);
+    editor.move(pointer(4.234, 4.456));
+    editor.up();
+  });
+  expect(editor.items[0]).toMatchObject({ x: 3.2, y: 3.5 });
+  act(() => editor.setSnapToGrid(false));
+  act(() => {
+    editor.down(pointer(4, 4), editor.items[0].id);
+    editor.move(pointer(4.234, 4.456));
+    editor.up();
+  });
+  expect(editor.items[0]).toMatchObject({ x: 3.434, y: 3.956 });
 });

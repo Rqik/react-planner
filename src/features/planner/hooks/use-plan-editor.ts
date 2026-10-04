@@ -10,10 +10,11 @@ import type {
   Tool,
   Gesture,
   PlanPointerEvent,
+  ResizeSide,
 } from '../types';
 import { obj, type Project } from '../model/project';
 import { tools, furniture } from '../model/tools';
-import { snap } from '../model/geometry';
+import { alignCoordinate, resizeRoom } from '../model/geometry';
 import { download } from '@/lib/download';
 import { createTemplate } from '../model/templates';
 import { readStoredProject, saveStoredProject } from '../model/storage';
@@ -25,6 +26,7 @@ export function usePlanEditor() {
     [selected, setSelected] = useState<string | null>(null),
     [zoom, setZoom] = useState(1),
     [grid, setGrid] = useState(true),
+    [snapToGrid, setSnapToGrid] = useState(true),
     [templates, setTemplates] = useState(false),
     [status, setStatus] = useState(''),
     [past, setPast] = useState<Project[]>([]),
@@ -96,19 +98,32 @@ export function usePlanEditor() {
     p.y = e.clientY;
     const q = p.matrixTransform(svg.current!.getScreenCTM()!.inverse());
     return {
-      x: snap(Math.max(0, Math.min(24, q.x))),
-      y: snap(Math.max(0, Math.min(20, q.y))),
+      x: Math.max(0, Math.min(24, q.x)),
+      y: Math.max(0, Math.min(20, q.y)),
     };
   };
   const down = (e: PlanPointerEvent, id?: string) => {
     if (e.button !== 0) return;
-    const p = point(e);
+    const raw = point(e);
+    const p =
+      tool === 'select'
+        ? raw
+        : {
+            x: alignCoordinate(raw.x, 0, 24, snapToGrid),
+            y: alignCoordinate(raw.y, 0, 20, snapToGrid),
+          };
     svg.current!.setPointerCapture(e.pointerId);
     if (tool === 'select') {
       setSelected(id || null);
       if (id) {
         const i = items.find((i) => i.id === id)!;
-        gesture.current = { mode: 'move', p, item: i, original: state.current };
+        gesture.current = {
+          mode: 'move',
+          pointerId: e.pointerId,
+          p,
+          item: i,
+          original: state.current,
+        };
       }
       return;
     }
@@ -139,11 +154,19 @@ export function usePlanEditor() {
       h = 0.9;
     }
     const i = {
-      ...obj(tool, name, Math.min(p.x, 24 - w), Math.min(p.y, 20 - h), w, h),
+      ...obj(
+        tool,
+        name,
+        alignCoordinate(p.x, 0, 24 - w, snapToGrid),
+        alignCoordinate(p.y, 0, 20 - h, snapToGrid),
+        w,
+        h,
+      ),
       id: newid,
     };
     gesture.current = {
       mode: ['room', 'wall'].includes(tool) ? 'draw' : 'place',
+      pointerId: e.pointerId,
       p,
       item: i,
       original: state.current,
@@ -151,17 +174,47 @@ export function usePlanEditor() {
     setSelected(newid);
     setProject(replaceItems([...items, i]));
   };
+  const startResize = (e: PlanPointerEvent, id: string, side: ResizeSide) => {
+    if (e.button !== 0 || gesture.current) return;
+    const item = state.current.floors[floor].find((item) => item.id === id);
+    if (!item || item.kind !== 'room') return;
+    e.stopPropagation();
+    e.preventDefault();
+    svg.current!.setPointerCapture(e.pointerId);
+    setSelected(id);
+    setTool('select');
+    gesture.current = {
+      mode: 'resize',
+      side,
+      pointerId: e.pointerId,
+      p: point(e),
+      item,
+      original: state.current,
+    };
+  };
   const move = (e: PlanPointerEvent) => {
     const g = gesture.current;
-    if (!g) return;
-    const p = point(e);
+    if (!g || g.pointerId !== e.pointerId) return;
+    const raw = point(e);
+    const p =
+      g.mode === 'draw'
+        ? {
+            x: alignCoordinate(raw.x, 0, 24, snapToGrid),
+            y: alignCoordinate(raw.y, 0, 20, snapToGrid),
+          }
+        : raw;
     let i = g.item;
     if (g.mode === 'move')
       i = {
         ...i,
-        x: Math.max(0, Math.min(24 - i.w, snap(i.x + p.x - g.p.x))),
-        y: Math.max(0, Math.min(20 - i.h, snap(i.y + p.y - g.p.y))),
+        x: alignCoordinate(i.x + p.x - g.p.x, 0, 24 - i.w, snapToGrid),
+        y: alignCoordinate(i.y + p.y - g.p.y, 0, 20 - i.h, snapToGrid),
       };
+    if (g.mode === 'resize' && g.side) {
+      const delta =
+        g.side === 'left' || g.side === 'right' ? p.x - g.p.x : p.y - g.p.y;
+      i = resizeRoom(i, g.side, delta, snapToGrid);
+    }
     if (g.mode === 'draw') {
       if (tool === 'wall') {
         const horizontal = Math.abs(p.x - g.p.x) >= Math.abs(p.y - g.p.y);
@@ -188,13 +241,35 @@ export function usePlanEditor() {
       ),
     );
   };
-  const up = () => {
+  const up = (e?: PlanPointerEvent) => {
     if (!gesture.current) return;
     const g = gesture.current;
-    setPast((h) => [...h.slice(-49), g.original]);
-    setFuture([]);
+    if (e && e.pointerId !== g.pointerId) return;
+    const current = state.current.floors[floor].find(
+      (item) => item.id === g.item.id,
+    );
+    const original = g.original.floors[floor].find(
+      (item) => item.id === g.item.id,
+    );
+    if (
+      !original ||
+      (current &&
+        (current.x !== original.x ||
+          current.y !== original.y ||
+          current.w !== original.w ||
+          current.h !== original.h))
+    ) {
+      setPast((h) => [...h.slice(-49), g.original]);
+      setFuture([]);
+    }
     gesture.current = null;
-    if (g.mode !== 'move') setTool('select');
+    if (g.mode === 'place' || g.mode === 'draw') setTool('select');
+  };
+  const cancelGesture = () => {
+    if (!gesture.current) return;
+    setProject(gesture.current.original);
+    gesture.current = null;
+    setSelected(null);
   };
 
   const exportSvg = () => {
@@ -275,6 +350,7 @@ export function usePlanEditor() {
     selected,
     zoom,
     grid,
+    snapToGrid,
     templates,
     status,
     svg,
@@ -288,6 +364,7 @@ export function usePlanEditor() {
     setSelected,
     setZoom,
     setGrid,
+    setSnapToGrid,
     setTemplates,
     patch,
     undo,
@@ -296,6 +373,8 @@ export function usePlanEditor() {
     down,
     move,
     up,
+    startResize,
+    cancelGesture,
     exportSvg,
     loadTemplate,
     importProject,

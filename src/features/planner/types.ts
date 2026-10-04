@@ -22,8 +22,11 @@ export type ItemKind =
   | 'bath'
   | 'stairs';
 export type Tool = 'select' | ItemKind;
+export type ResizeSide = 'left' | 'right' | 'top' | 'bottom';
 export type Gesture = {
-  mode: 'move' | 'draw' | 'place';
+  mode: 'move' | 'draw' | 'place' | 'resize';
+  side?: ResizeSide;
+  pointerId: number;
   p: {
     x: number;
     y: number;

@@ -3,6 +3,8 @@ import type { PlanEditor } from '../hooks/use-plan-editor';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
 import { PlanObject } from './plan-object';
+import { PlanGrid, useGridPatternId } from './plan-grid';
+import { RoomResizeHandles } from './room-resize-handles';
 import { snap } from '../model/geometry';
 type Props = Pick<
   PlanEditor,
@@ -12,17 +14,21 @@ type Props = Pick<
   | 'selected'
   | 'zoom'
   | 'grid'
+  | 'snapToGrid'
   | 'svg'
   | 'items'
   | 'past'
   | 'future'
   | 'setZoom'
   | 'setGrid'
+  | 'setSnapToGrid'
   | 'undo'
   | 'redo'
   | 'down'
   | 'move'
   | 'up'
+  | 'startResize'
+  | 'cancelGesture'
   | 'exportSvg'
   | 'addFloor'
   | 'changeFloor'
@@ -34,21 +40,29 @@ export function PlanCanvas({
   selected,
   zoom,
   grid,
+  snapToGrid,
   svg,
   items,
   past,
   future,
   setZoom,
   setGrid,
+  setSnapToGrid,
   undo,
   redo,
   down,
   move,
   up,
+  startResize,
+  cancelGesture,
   exportSvg,
   addFloor,
   changeFloor,
 }: Props) {
+  const patternId = useGridPatternId();
+  const selectedRoom = items.find(
+    (item) => item.id === selected && item.kind === 'room',
+  );
   return (
     <main className="editor">
       <div className="canvas-toolbar">
@@ -112,73 +126,18 @@ export function PlanCanvas({
           </div>
           <svg
             ref={svg}
-            viewBox="0 0 24 20"
+            viewBox="-1 -1 26 22"
             className="plan"
             role="img"
             aria-label={`Редактор плана, этаж ${floor + 1}`}
             onPointerDown={(e) => down(e)}
             onPointerMove={move}
             onPointerUp={up}
-            onPointerCancel={up}
+            onPointerCancel={cancelGesture}
+            onLostPointerCapture={cancelGesture}
             style={{ cursor: tool === 'select' ? 'default' : 'crosshair' }}
           >
-            <defs>
-              <pattern
-                id="smallgrid"
-                width=".1"
-                height=".1"
-                patternUnits="userSpaceOnUse"
-              >
-                <path
-                  d="M .1 0 L 0 0 0 .1"
-                  fill="none"
-                  stroke="#e3e8ee"
-                  strokeWidth=".008"
-                />
-              </pattern>
-              <pattern
-                id="grid"
-                width="1"
-                height="1"
-                patternUnits="userSpaceOnUse"
-              >
-                <rect width="1" height="1" fill="url(#smallgrid)" />
-                <path
-                  d="M 1 0 L 0 0 0 1"
-                  fill="none"
-                  stroke="#cad3df"
-                  strokeWidth=".012"
-                />
-              </pattern>
-            </defs>
-            <rect width="24" height="20" fill="#ffffff" />
-            {grid && <rect width="24" height="20" fill="url(#grid)" />}
-            {Array.from({ length: 23 }, (_, n) => (
-              <text
-                key={n}
-                x={n + 1}
-                y=".55"
-                fontSize=".2"
-                fill="#97a5b4"
-                textAnchor="middle"
-                className="ruler"
-              >
-                {n + 1}
-              </text>
-            ))}
-            {Array.from({ length: 19 }, (_, n) => (
-              <text
-                key={n}
-                x=".35"
-                y={n + 1}
-                fontSize=".2"
-                fill="#97a5b4"
-                textAnchor="middle"
-                className="ruler"
-              >
-                {n + 1}
-              </text>
-            ))}
+            <PlanGrid id={patternId} visible={grid} />
             {[
               ...items.filter((i) => i.kind === 'room'),
               ...items.filter((i) => i.kind !== 'room'),
@@ -187,15 +146,24 @@ export function PlanCanvas({
                 key={i.id}
                 item={i}
                 selected={selected === i.id}
+                gridFill={grid ? `url(#${patternId})` : undefined}
                 onPointerDown={down}
               />
             ))}
+            {selectedRoom ? (
+              <RoomResizeHandles item={selectedRoom} onResize={startResize} />
+            ) : null}
           </svg>
         </div>
       </div>
       <div className="canvas-footer">
-        <span>
-          <span className="crosshair">⊹</span> Привязка 10 см{' '}
+        <span className="snap-control">
+          <Checkbox
+            id="snap-grid"
+            checked={snapToGrid}
+            onCheckedChange={(value) => setSnapToGrid(value === true)}
+          />
+          <label htmlFor="snap-grid">Привязка 10 см</label>
           <span className="footer-muted">· Поле 24 × 20 м</span>
         </span>
         <div className="zoom">
